@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "git-command-center"
+version = "0.1.0"
+description = "A keyboard-first terminal Git repository command center"
+requires-python = ">=3.11"
+
+[project.scripts]
+grcc = "git_command_center.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+

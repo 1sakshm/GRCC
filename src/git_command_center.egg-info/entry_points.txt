@@ -1,0 +1,2 @@
+[console_scripts]
+grcc = git_command_center.cli:main

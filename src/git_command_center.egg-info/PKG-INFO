@@ -1,0 +1,5 @@
+Metadata-Version: 2.4
+Name: git-command-center
+Version: 0.1.0
+Summary: A keyboard-first terminal Git repository command center
+Requires-Python: >=3.11
