@@ -3,7 +3,7 @@ from __future__ import annotations
 import queue
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from .models import RepositoryState
@@ -17,6 +17,32 @@ class ApplicationState:
     show_help: bool = False
     dashboard: bool = False
     loading: bool = False
+    selected_file: int = 0
+    selected_paths: set[str] = field(default_factory=set)
+    filter_mode: str = "all"
+    search_query: str = ""
+    pending_discard: bool = False
+    detail_file_path: str | None = None
+
+    def visible_files(self):
+        if not self.repository:
+            return ()
+        files = self.repository.files
+        if self.filter_mode == "staged":
+            files = tuple(file for file in files if file.staged)
+        elif self.filter_mode == "unstaged":
+            files = tuple(file for file in files if file.unstaged and file.kind != "untracked")
+        elif self.filter_mode == "untracked":
+            files = tuple(file for file in files if file.kind == "untracked")
+        elif self.filter_mode == "conflicts":
+            files = tuple(file for file in files if file.kind == "conflicted")
+        elif self.filter_mode.startswith("ext:"):
+            suffix = self.filter_mode.removeprefix("ext:").lower()
+            files = tuple(file for file in files if file.path.lower().endswith(suffix))
+        if self.search_query:
+            needle = self.search_query.lower()
+            files = tuple(file for file in files if needle in file.path.lower())
+        return files
 
 
 class RepositoryRefresher:
@@ -45,4 +71,3 @@ class RepositoryRefresher:
 
     def close(self) -> None:
         self._executor.shutdown(wait=False, cancel_futures=True)
-

@@ -53,6 +53,36 @@ class WorkingTreeSummary:
         return ", ".join(values) or "clean"
 
 
+FileKind = Literal["modified", "added", "deleted", "renamed", "copied", "untracked", "ignored", "conflicted"]
+
+
+@dataclass(frozen=True)
+class FileChange:
+    path: str
+    index_status: str = " "
+    worktree_status: str = " "
+    kind: FileKind = "modified"
+    original_path: str | None = None
+
+    @property
+    def staged(self) -> bool:
+        return self.index_status != " " and self.kind not in {"untracked", "ignored"}
+
+    @property
+    def unstaged(self) -> bool:
+        return self.worktree_status != " " or self.kind == "untracked"
+
+    @property
+    def code(self) -> str:
+        if self.kind == "untracked":
+            return "?"
+        if self.kind == "ignored":
+            return "!"
+        if self.kind == "conflicted":
+            return "U"
+        return f"{self.index_status}{self.worktree_status}".strip() or "M"
+
+
 @dataclass(frozen=True)
 class RepositoryState:
     requested_path: Path
@@ -65,6 +95,17 @@ class RepositoryState:
     bare: bool = False
     remotes: tuple[Remote, ...] = ()
     status: WorkingTreeSummary = field(default_factory=WorkingTreeSummary)
+    files: tuple[FileChange, ...] = ()
+    upstream: str | None = None
+    ahead: int = 0
+    behind: int = 0
+    stash_count: int = 0
+    tag_count: int = 0
+    branch_count: int = 0
+    commit_count: int = 0
+    repository_size: int = 0
+    user_name: str | None = None
+    user_email: str | None = None
     loaded_at: datetime = field(default_factory=datetime.now)
     error: str | None = None
 
@@ -75,4 +116,3 @@ class RepositoryState:
     @property
     def is_repository(self) -> bool:
         return self.root is not None and self.error is None
-
