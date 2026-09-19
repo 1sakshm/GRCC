@@ -154,6 +154,9 @@ class CommitRecord:
 
 
 @dataclass(frozen=True)
+class BranchRecord:
+    name: str
+    upstream: str | None = None
 class RepositoryState:
     requested_path: Path
     root: Path | None = None
