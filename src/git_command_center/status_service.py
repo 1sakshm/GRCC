@@ -6,6 +6,8 @@ from pathlib import Path
 
 from .git_runner import GitCommandRunner
 from .models import GitCommandResult
+from .models import DiffFile, DiffHunk
+from .diff_service import DiffService
 
 
 class WorkingTreeService:
@@ -13,6 +15,7 @@ class WorkingTreeService:
 
     def __init__(self, runner: GitCommandRunner) -> None:
         self.runner = runner
+        self.diffs = DiffService(runner)
 
     def stage(self, root: Path, paths: list[str]) -> GitCommandResult:
         return self.runner.run(["add", "--", *paths], cwd=root)
@@ -22,6 +25,12 @@ class WorkingTreeService:
 
     def discard(self, root: Path, paths: list[str]) -> GitCommandResult:
         return self.runner.run(["restore", "--worktree", "--", *paths], cwd=root)
+
+    def stage_hunk(self, root: Path, diff_file: DiffFile, hunk: DiffHunk) -> GitCommandResult:
+        return self.diffs.stage_hunk(root, diff_file, hunk)
+
+    def unstage_hunk(self, root: Path, diff_file: DiffFile, hunk: DiffHunk) -> GitCommandResult:
+        return self.diffs.unstage_hunk(root, diff_file, hunk)
 
     def copy_path(self, root: Path, path: str) -> str:
         full_path = str((root / path).resolve())

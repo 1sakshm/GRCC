@@ -23,6 +23,12 @@ class GitCommandRunnerTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             GitCommandRunner().run(["status\x00unsafe"])
 
+    def test_delivers_standard_input_to_git(self) -> None:
+        result = GitCommandRunner().run(["hash-object", "--stdin"], input_text="hello\n", timeout=1)
+
+        self.assertTrue(result.succeeded)
+        self.assertEqual(len(result.stdout.strip()), 40)
+
 
 if __name__ == "__main__":
     unittest.main()

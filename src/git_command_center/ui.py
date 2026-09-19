@@ -43,6 +43,10 @@ class TerminalUI:
             frame = ["Terminal too small — resize to at least 44 × 12.", "[Q] Quit"]
         elif state.show_help:
             frame = self._help(width)
+        elif state.view == "diff":
+            frame = self._diff(state, width, height)
+        elif state.view == "history":
+            frame = self._history(state, width, height)
         elif state.dashboard:
             frame = self._dashboard(state, width)
         else:
@@ -63,6 +67,90 @@ class TerminalUI:
                       self._status(state.message, width)])
         return lines
 
+    def _diff(self, state: ApplicationState, width: int, height: int) -> list[str]:
+        diff_file = state.current_diff_file()
+        title = f"DIFF - {diff_file.path if diff_file else 'No change selected'}"
+        rows = self._box(title, width)
+        if not diff_file:
+            rows.append(self._row("No diff is available for this comparison.", width, self.theme.muted))
+        elif diff_file.binary:
+            rows.append(self._row("Binary file: textual diff is unavailable.", width, self.theme.warning))
+        elif not diff_file.hunks:
+            rows.append(self._row("No textual hunks.", width, self.theme.muted))
+        else:
+            hunk = state.current_hunk()
+            assert hunk is not None
+            rows.append(self._row(f"{state.diff_comparison} · {state.diff_layout} · Hunk {state.diff_hunk_index + 1}/{len(diff_file.hunks)}  +{hunk.additions} -{hunk.deletions}", width, self.theme.accent))
+            rows.append(self._row(f"@@ -{hunk.old_start},{hunk.old_count} +{hunk.new_start},{hunk.new_count} @@ {hunk.heading}", width, self.theme.muted))
+            available = max(4, height - 8)
+            if state.diff_layout == "side-by-side":
+                rows.extend(self._side_by_side(hunk.lines, width, available))
+            else:
+                rows.extend(self._unified(hunk.lines, width, available))
+        rows.append(self._border(width, "bottom"))
+        rows.append(self._row("[N/P] Hunk  [Tab] Layout  [W/I/A] Compare  [S] Stage  [U] Unstage", width))
+        rows.append(self._row("[D] Discard hunk  [Esc] Back", width))
+        rows.append(self._status(state.message, width))
+        if self.ascii_only:
+            rows = [row.encode("ascii", "replace").decode("ascii") for row in rows]
+        return rows
+
+    def _history(self, state: ApplicationState, width: int, height: int) -> list[str]:
+        rows = self._box("COMMIT HISTORY", width)
+        if not state.commits:
+            rows.append(self._row("No commits match the active filters.", width, self.theme.muted))
+        else:
+            capacity = max(4, height - 9)
+            start = max(0, min(state.selected_commit - capacity + 1, len(state.commits) - capacity))
+            for index, commit in enumerate(state.commits[start:start + capacity], start):
+                cursor = ">" if index == state.selected_commit else " "
+                decoration = f" [{', '.join(commit.decorations)}]" if commit.decorations else ""
+                rows.append(self._row(f"{cursor} {commit.graph:<9} {commit.short_hash} {commit.subject}{decoration}", width))
+            selected = state.current_commit()
+            if selected:
+                rows.append(self._border(width, "bottom"))
+                rows.append(self._row(f"Author: {selected.author} <{selected.author_email}>  Date: {selected.timestamp[:10]}", width))
+                rows.append(self._row(f"Parents: {', '.join(parent[:8] for parent in selected.parents) or 'none'}  Files: {selected.files_changed}  +{selected.additions} -{selected.deletions}", width))
+        rows.append(self._border(width, "bottom"))
+        rows.append(self._row("[Up/Down] Select [Enter] Details [N/P] Page [/] Msg [A] Author [B] Branch [F] Path", width))
+        rows.append(self._row("[Esc] Back", width))
+        rows.append(self._status(state.message, width))
+        if self.ascii_only:
+            rows = [row.encode("ascii", "replace").decode("ascii") for row in rows]
+        return rows
+
+    def _unified(self, lines, width: int, capacity: int) -> list[str]:
+        prefix = {"context": " ", "addition": "+", "deletion": "-", "meta": "\\"}
+        rows = []
+        for line in lines[:capacity]:
+            old = "" if line.old_line is None else str(line.old_line)
+            new = "" if line.new_line is None else str(line.new_line)
+            rows.append(self._row(f"{old:>5} {new:>5} {prefix[line.type]} {line.content}", width))
+        return rows
+
+    def _side_by_side(self, lines, width: int, capacity: int) -> list[str]:
+        half = max(12, (width - 7) // 2)
+        rows, pending = [], None
+        for line in lines:
+            if len(rows) >= capacity:
+                break
+            if line.type == "deletion":
+                pending = line
+                continue
+            if line.type == "addition" and pending:
+                rows.append(self._row(f"-{pending.old_line or '':>4} {pending.content[:half]} | +{line.new_line or '':>4} {line.content[:half]}", width))
+                pending = None
+            elif line.type == "addition":
+                rows.append(self._row(f"{'':{half + 6}} | +{line.new_line or '':>4} {line.content[:half]}", width))
+            else:
+                if pending:
+                    rows.append(self._row(f"-{pending.old_line or '':>4} {pending.content[:half]} |", width))
+                    pending = None
+                rows.append(self._row(f" {line.old_line or '':>4} {line.content[:half]} |  {line.new_line or '':>4} {line.content[:half]}", width))
+        if pending and len(rows) < capacity:
+            rows.append(self._row(f"-{pending.old_line or '':>4} {pending.content[:half]} |", width))
+        return rows
+
     def _dashboard(self, state: ApplicationState, width: int) -> list[str]:
         repo = state.repository
         title = f"DASHBOARD {'-' if self.ascii_only else '·'} {repo.repository_name if repo else 'No repository'}"
@@ -73,7 +161,7 @@ class TerminalUI:
         else:
             lines.extend(self._repository_rows(repo, width))
         lines.append(self._border(width, "bottom"))
-        controls = "[S] Stage [U] Unstage [D] Discard [Space] Select [F] Filter [/] Search"
+        controls = "[S] Stage [U] Unstage [d] Diff [G] Graph [D] Discard [Space] Select [F] Filter"
         lines.append(self._row(controls, width))
         lines.append(self._row("[E] Editor [C] Copy path [R] Refresh [O] Open [H] Help [Q] Quit", width))
         if state.pending_discard:
@@ -117,7 +205,7 @@ class TerminalUI:
 
     def _help(self, width: int) -> list[str]:
         lines = self._box("HELP", width)
-        entries = ["Up/Down Navigate files", "Enter  Toggle file metadata", "Space Select file", "S/U Stage or unstage", "D      Discard (confirm)", "F/X    Cycle filters / filter extension", "/      Search file names", "E/C    External editor / copy path", "R      Refresh", "H/Esc  Close help", "Q      Quit"]
+        entries = ["Up/Down Navigate files", "Enter  Toggle file metadata", "Space Select file", "S/U Stage or unstage", "d      Open selected-file diff", "D      Discard (confirm)", "F/X    Cycle filters / filter extension", "/      Search file names", "E/C    External editor / copy path", "R      Refresh", "H/Esc  Close help", "Q      Quit"]
         lines.extend(self._row(entry, width) for entry in entries)
         lines += [self._border(width, "bottom"), self._row("All Git operations run through the application service layer.", width)]
         return lines

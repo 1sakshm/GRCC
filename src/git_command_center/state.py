@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .models import RepositoryState
+from .models import CommitRecord, DiffFile, RepositoryState
 from .repository_service import RepositoryService
 
 
@@ -23,6 +23,22 @@ class ApplicationState:
     search_query: str = ""
     pending_discard: bool = False
     detail_file_path: str | None = None
+    view: str = "dashboard"
+    diff_files: tuple[DiffFile, ...] = ()
+    diff_file_index: int = 0
+    diff_hunk_index: int = 0
+    diff_comparison: str = "working"
+    diff_layout: str = "unified"
+    commits: tuple[CommitRecord, ...] = ()
+    selected_commit: int = 0
+    history_skip: int = 0
+    history_query: str = ""
+    history_author: str = ""
+    history_branch: str = ""
+    history_path: str = ""
+
+    def current_commit(self) -> CommitRecord | None:
+        return self.commits[self.selected_commit] if self.commits else None
 
     def visible_files(self):
         if not self.repository:
@@ -43,6 +59,13 @@ class ApplicationState:
             needle = self.search_query.lower()
             files = tuple(file for file in files if needle in file.path.lower())
         return files
+
+    def current_diff_file(self) -> DiffFile | None:
+        return self.diff_files[self.diff_file_index] if self.diff_files else None
+
+    def current_hunk(self):
+        file = self.current_diff_file()
+        return file.hunks[self.diff_hunk_index] if file and file.hunks else None
 
 
 class RepositoryRefresher:

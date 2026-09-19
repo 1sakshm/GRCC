@@ -8,7 +8,7 @@ sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 
 from git_command_center.ui import TerminalUI
 from git_command_center.state import ApplicationState
-from git_command_center.models import RepositoryState
+from git_command_center.models import DiffFile, DiffHunk, DiffLine, RepositoryState
 
 
 class TerminalUITests(unittest.TestCase):
@@ -25,6 +25,14 @@ class TerminalUITests(unittest.TestCase):
         rows = TerminalUI(ascii_only=True)._dashboard(
             ApplicationState(repository=RepositoryState(Path("repo"), root=Path("repo")), dashboard=True), 70
         )
+
+        self.assertTrue(all(ord(character) < 128 for row in rows for character in row))
+
+    def test_ascii_diff_has_no_unicode_characters(self) -> None:
+        hunk = DiffHunk(1, 1, 1, 1, "", (DiffLine("deletion", "old", 1), DiffLine("addition", "new", None, 1)), "@@ -1 +1 @@\n-old\n+new")
+        state = ApplicationState(view="diff", diff_files=(DiffFile("a.txt", "a.txt", "modified", (hunk,)),))
+
+        rows = TerminalUI(ascii_only=True)._diff(state, 70, 24)
 
         self.assertTrue(all(ord(character) < 128 for row in rows for character in row))
 

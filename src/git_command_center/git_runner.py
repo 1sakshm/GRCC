@@ -28,6 +28,7 @@ class GitCommandRunner:
         cwd: Path | None = None,
         timeout: float = 12.0,
         cancellation: threading.Event | None = None,
+        input_text: str | None = None,
     ) -> GitCommandResult:
         if not args or any(not isinstance(arg, str) or "\x00" in arg for arg in args):
             raise ValueError("Git arguments must be non-empty strings without NUL bytes")
@@ -37,32 +38,34 @@ class GitCommandRunner:
         process = subprocess.Popen(
             command,
             cwd=safe_cwd,
-            stdin=subprocess.DEVNULL,
+            stdin=subprocess.PIPE if input_text is not None else subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
             shell=False,
         )
         status = "ok"
-        stdout = stderr = ""
+        stdout_bytes = stderr_bytes = b""
         try:
-            while process.poll() is None:
-                if cancellation and cancellation.is_set():
-                    status = "cancelled"
-                    process.terminate()
-                    break
-                if time.monotonic() - started > timeout:
-                    status = "timed_out"
-                    process.kill()
-                    break
-                time.sleep(0.025)
-            stdout, stderr = process.communicate(timeout=1)
+            if input_text is not None:
+                stdout_bytes, stderr_bytes = process.communicate(input=input_text.encode("utf-8"), timeout=timeout)
+            else:
+                while process.poll() is None:
+                    if cancellation and cancellation.is_set():
+                        status = "cancelled"
+                        process.terminate()
+                        break
+                    if time.monotonic() - started > timeout:
+                        status = "timed_out"
+                        process.kill()
+                        break
+                    time.sleep(0.025)
+                stdout_bytes, stderr_bytes = process.communicate(timeout=1)
         except subprocess.TimeoutExpired:
             status = "timed_out"
             process.kill()
-            stdout, stderr = process.communicate()
+            stdout_bytes, stderr_bytes = process.communicate()
+        stdout = stdout_bytes.decode("utf-8", errors="replace")
+        stderr = stderr_bytes.decode("utf-8", errors="replace")
         result = GitCommandResult(
             args=tuple(args), cwd=safe_cwd, stdout=stdout, stderr=stderr,
             exit_code=process.returncode, status=status,
@@ -71,4 +74,3 @@ class GitCommandRunner:
         with self._history_lock:
             self._history.append(result)
         return result
-

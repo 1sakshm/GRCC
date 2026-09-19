@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 
 from .config import ConfigStore
+from .commit_service import CommitService
 from .repository_service import RepositoryService
 from .state import ApplicationState, RepositoryRefresher
 from .status_service import WorkingTreeService
@@ -29,6 +30,7 @@ def main(argv: list[str] | None = None) -> int:
     target = (args.path or Path.cwd()).expanduser().resolve()
     state = ApplicationState(message="Loading repository…", loading=True)
     service = RepositoryService()
+    commits = CommitService(service.runner)
     working_tree = WorkingTreeService(service.runner)
     refresher = RepositoryRefresher(service)
     ui = TerminalUI(ascii_only=settings.ascii_only)
@@ -62,6 +64,12 @@ def main(argv: list[str] | None = None) -> int:
                 continue
             if key in {"q", "Q"}:
                 break
+            if state.view == "diff":
+                _handle_diff_key(key, state, working_tree, target, refresher)
+                continue
+            if state.view == "history":
+                _handle_history_key(key, state, commits, target, ui)
+                continue
             if key in {"h", "H", "ESC"}:
                 state.show_help = not state.show_help if key != "ESC" else False
             elif state.pending_discard:
@@ -102,7 +110,13 @@ def main(argv: list[str] | None = None) -> int:
             elif key in {"u", "U"}:
                 _unstage_selected(state, working_tree, target)
                 refresher.refresh(target)
-            elif key in {"d", "D"}:
+            elif key == "d":
+                _open_diff(state, working_tree, target)
+            elif key in {"g", "G"}:
+                state.view = "history"
+                state.history_skip = state.selected_commit = 0
+                _load_history(state, commits, target)
+            elif key == "D":
                 if _action_paths(state):
                     state.pending_discard = True
                 else:
@@ -206,3 +220,115 @@ def _discard_selected(state: ApplicationState, service: WorkingTreeService, root
     paths = _action_paths(state)
     result = service.discard(root, paths)
     state.message = f"Discarded {len(paths)} file(s)." if result.succeeded else result.stderr.strip() or "Could not discard files."
+
+
+def _open_diff(state: ApplicationState, service: WorkingTreeService, root: Path) -> None:
+    file = _current_file(state)
+    if not file:
+        state.message = "Select a file to inspect its diff."
+        return
+    state.view = "diff"
+    state.diff_comparison = "staged" if file.staged and not file.unstaged else "working"
+    state.diff_file_index = state.diff_hunk_index = 0
+    _load_diff(state, service, root, file.path)
+
+
+def _load_diff(state: ApplicationState, service: WorkingTreeService, root: Path, path: str | None) -> None:
+    if state.diff_comparison == "staged":
+        state.diff_files = service.diffs.staged(root, path)
+    elif state.diff_comparison == "head":
+        state.diff_files = service.diffs.against_head(root, path)
+    else:
+        state.diff_files = service.diffs.working_tree(root, path)
+    state.diff_file_index = min(state.diff_file_index, max(0, len(state.diff_files) - 1))
+    current = state.current_diff_file()
+    state.diff_hunk_index = min(state.diff_hunk_index, max(0, len(current.hunks) - 1 if current else 0))
+    state.message = "No textual changes found." if not state.diff_files else f"Loaded {state.diff_comparison} diff."
+
+
+def _handle_diff_key(key: str, state: ApplicationState, service: WorkingTreeService, root: Path, refresher: RepositoryRefresher) -> None:
+    if key == "ESC":
+        state.view = "dashboard"
+        return
+    diff_file = state.current_diff_file()
+    if key in {"n", "N", "DOWN"} and diff_file:
+        state.diff_hunk_index = min(state.diff_hunk_index + 1, max(0, len(diff_file.hunks) - 1))
+    elif key in {"p", "P", "UP"}:
+        state.diff_hunk_index = max(0, state.diff_hunk_index - 1)
+    elif key == "\t":
+        state.diff_layout = "side-by-side" if state.diff_layout == "unified" else "unified"
+    elif key in {"w", "W", "i", "I", "a", "A"}:
+        state.diff_comparison = {"w": "working", "i": "staged", "a": "head"}[key.lower()]
+        state.diff_hunk_index = 0
+        _load_diff(state, service, root, diff_file.path if diff_file else None)
+    elif key in {"s", "S"} and diff_file and state.current_hunk():
+        if state.diff_comparison != "working":
+            state.message = "Switch to working-tree comparison to stage a hunk."
+            return
+        result = service.stage_hunk(root, diff_file, state.current_hunk())
+        state.message = "Hunk staged." if result.succeeded else result.stderr.strip() or "Could not stage hunk."
+        refresher.refresh(root)
+        _load_diff(state, service, root, diff_file.path)
+    elif key in {"u", "U"} and diff_file and state.current_hunk():
+        if state.diff_comparison != "staged":
+            state.message = "Switch to staged comparison to unstage a hunk."
+            return
+        result = service.unstage_hunk(root, diff_file, state.current_hunk())
+        state.message = "Hunk unstaged." if result.succeeded else result.stderr.strip() or "Could not unstage hunk."
+        refresher.refresh(root)
+        _load_diff(state, service, root, diff_file.path)
+    elif key == "D" and diff_file and state.current_hunk():
+        if state.diff_comparison != "working":
+            state.message = "Switch to working-tree comparison to discard a hunk."
+            return
+        result = service.diffs.discard_hunk(root, diff_file, state.current_hunk())
+        state.message = "Hunk discarded." if result.succeeded else result.stderr.strip() or "Could not discard hunk."
+        refresher.refresh(root)
+        _load_diff(state, service, root, diff_file.path)
+
+
+def _load_history(state: ApplicationState, service: CommitService, root: Path) -> None:
+    state.commits = service.history(root, limit=80, skip=state.history_skip, query=state.history_query or None, author=state.history_author or None, branch=state.history_branch or None, path=state.history_path or None)
+    state.selected_commit = min(state.selected_commit, max(0, len(state.commits) - 1))
+    state.message = f"Loaded {len(state.commits)} commits." if state.commits else "No commits matched history filters."
+
+
+def _handle_history_key(key: str, state: ApplicationState, service: CommitService, root: Path, ui: TerminalUI) -> None:
+    if key == "ESC":
+        state.view = "dashboard"
+        return
+    if key in {"DOWN", "j", "J"}:
+        state.selected_commit = min(state.selected_commit + 1, max(0, len(state.commits) - 1))
+    elif key in {"UP", "k", "K"}:
+        state.selected_commit = max(0, state.selected_commit - 1)
+    elif key in {"n", "N"}:
+        state.history_skip += 80
+        state.selected_commit = 0
+        _load_history(state, service, root)
+    elif key in {"p", "P"}:
+        state.history_skip = max(0, state.history_skip - 80)
+        state.selected_commit = 0
+        _load_history(state, service, root)
+    elif key == "/":
+        state.history_query = _prompt_text(ui, "Commit message filter (blank clears): ") or ""
+        state.history_skip = state.selected_commit = 0
+        _load_history(state, service, root)
+    elif key in {"a", "A"}:
+        state.history_author = _prompt_text(ui, "Author filter (blank clears): ") or ""
+        state.history_skip = state.selected_commit = 0
+        _load_history(state, service, root)
+    elif key in {"b", "B"}:
+        state.history_branch = _prompt_text(ui, "Branch or revision filter (blank clears): ") or ""
+        state.history_skip = state.selected_commit = 0
+        _load_history(state, service, root)
+    elif key in {"f", "F"}:
+        state.history_path = _prompt_text(ui, "Path history filter (blank clears): ") or ""
+        state.history_skip = state.selected_commit = 0
+        _load_history(state, service, root)
+    elif key == "ENTER":
+        commit = state.current_commit()
+        if commit:
+            detail = service.details(root, commit.hash)
+            if detail:
+                state.commits = tuple(detail if item.hash == detail.hash else item for item in state.commits)
+                state.message = "Loaded selected commit details."

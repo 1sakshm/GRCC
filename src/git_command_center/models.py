@@ -54,6 +54,7 @@ class WorkingTreeSummary:
 
 
 FileKind = Literal["modified", "added", "deleted", "renamed", "copied", "untracked", "ignored", "conflicted"]
+DiffLineType = Literal["context", "addition", "deletion", "meta"]
 
 
 @dataclass(frozen=True)
@@ -81,6 +82,75 @@ class FileChange:
         if self.kind == "conflicted":
             return "U"
         return f"{self.index_status}{self.worktree_status}".strip() or "M"
+
+
+@dataclass(frozen=True)
+class DiffLine:
+    type: DiffLineType
+    content: str
+    old_line: int | None = None
+    new_line: int | None = None
+
+
+@dataclass(frozen=True)
+class DiffHunk:
+    old_start: int
+    old_count: int
+    new_start: int
+    new_count: int
+    heading: str
+    lines: tuple[DiffLine, ...]
+    patch: str
+
+    @property
+    def additions(self) -> int:
+        return sum(line.type == "addition" for line in self.lines)
+
+    @property
+    def deletions(self) -> int:
+        return sum(line.type == "deletion" for line in self.lines)
+
+
+@dataclass(frozen=True)
+class DiffFile:
+    old_path: str | None
+    new_path: str | None
+    status: str
+    hunks: tuple[DiffHunk, ...] = ()
+    header: tuple[str, ...] = ()
+    binary: bool = False
+
+    @property
+    def path(self) -> str:
+        return self.new_path or self.old_path or "unknown"
+
+    @property
+    def additions(self) -> int:
+        return sum(hunk.additions for hunk in self.hunks)
+
+    @property
+    def deletions(self) -> int:
+        return sum(hunk.deletions for hunk in self.hunks)
+
+
+@dataclass(frozen=True)
+class CommitRecord:
+    hash: str
+    parents: tuple[str, ...]
+    author: str
+    author_email: str
+    timestamp: str
+    subject: str
+    decorations: tuple[str, ...] = ()
+    graph: str = "*"
+    lane: int = 0
+    files_changed: int = 0
+    additions: int = 0
+    deletions: int = 0
+
+    @property
+    def short_hash(self) -> str:
+        return self.hash[:8]
 
 
 @dataclass(frozen=True)
