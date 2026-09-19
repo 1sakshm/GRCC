@@ -157,6 +157,36 @@ class CommitRecord:
 class BranchRecord:
     name: str
     upstream: str | None = None
+    current: bool = False
+    remote: bool = False
+    last_activity: str | None = None
+
+
+@dataclass(frozen=True)
+class TagRecord:
+    name: str
+    target: str
+    annotated: bool = False
+    date: str | None = None
+
+
+@dataclass(frozen=True)
+class StashRecord:
+    reference: str
+    message: str
+    commit: str
+
+
+@dataclass(frozen=True)
+class WorktreeRecord:
+    path: str
+    head: str
+    branch: str | None = None
+    bare: bool = False
+    locked: bool = False
+
+
+@dataclass(frozen=True)
 class RepositoryState:
     requested_path: Path
     root: Path | None = None

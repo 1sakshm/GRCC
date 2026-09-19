@@ -36,6 +36,13 @@ class ApplicationState:
     history_author: str = ""
     history_branch: str = ""
     history_path: str = ""
+    management_kind: str = "branches"
+    management_items: tuple = ()
+    selected_management: int = 0
+    pending_management_delete: bool = False
+
+    def current_management(self):
+        return self.management_items[self.selected_management] if self.management_items else None
 
     def current_commit(self) -> CommitRecord | None:
         return self.commits[self.selected_commit] if self.commits else None

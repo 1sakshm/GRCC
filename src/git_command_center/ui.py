@@ -47,6 +47,8 @@ class TerminalUI:
             frame = self._diff(state, width, height)
         elif state.view == "history":
             frame = self._history(state, width, height)
+        elif state.view == "management":
+            frame = self._management(state, width, height)
         elif state.dashboard:
             frame = self._dashboard(state, width)
         else:
@@ -117,6 +119,25 @@ class TerminalUI:
         rows.append(self._status(state.message, width))
         if self.ascii_only:
             rows = [row.encode("ascii", "replace").decode("ascii") for row in rows]
+        return rows
+
+    def _management(self, state: ApplicationState, width: int, height: int) -> list[str]:
+        rows = self._box(state.management_kind.upper(), width)
+        items = state.management_items
+        if not items:
+            rows.append(self._row("No entries found.", width, self.theme.muted))
+        for index, item in enumerate(items[: max(4, height - 7)]):
+            cursor = ">" if index == state.selected_management else " "
+            if state.management_kind == "branches": text = f"{'* ' if item.current else '  '}{item.name}  {item.upstream or '-'}  {item.last_activity or ''}"
+            elif state.management_kind == "tags": text = f"{item.name}  {item.target[:10]}  {'annotated' if item.annotated else 'lightweight'}"
+            elif state.management_kind == "stashes": text = f"{item.reference}  {item.message}"
+            else: text = f"{item.path}  {item.branch or item.head[:10]}"
+            rows.append(self._row(f"{cursor} {text}", width))
+        rows.append(self._border(width, "bottom"))
+        rows.append(self._row("[N] New  [Enter] Switch/Apply  [D] Delete  [R] Refresh  [Esc] Back", width))
+        if state.pending_management_delete:
+            rows.append(self._row("Destructive delete: [Y] confirm  [N] cancel", width, self.theme.warning))
+        rows.append(self._status(state.message, width))
         return rows
 
     def _unified(self, lines, width: int, capacity: int) -> list[str]:

@@ -9,6 +9,7 @@ from pathlib import Path
 
 from .config import ConfigStore
 from .commit_service import CommitService
+from .management_service import RepositoryManagementService
 from .repository_service import RepositoryService
 from .state import ApplicationState, RepositoryRefresher
 from .status_service import WorkingTreeService
@@ -31,6 +32,7 @@ def main(argv: list[str] | None = None) -> int:
     state = ApplicationState(message="Loading repository…", loading=True)
     service = RepositoryService()
     commits = CommitService(service.runner)
+    management = RepositoryManagementService(service.runner)
     working_tree = WorkingTreeService(service.runner)
     refresher = RepositoryRefresher(service)
     ui = TerminalUI(ascii_only=settings.ascii_only)
@@ -69,6 +71,9 @@ def main(argv: list[str] | None = None) -> int:
                 continue
             if state.view == "history":
                 _handle_history_key(key, state, commits, target, ui)
+                continue
+            if state.view == "management":
+                _handle_management_key(key, state, management, target, ui, refresher)
                 continue
             if key in {"h", "H", "ESC"}:
                 state.show_help = not state.show_help if key != "ESC" else False
@@ -116,6 +121,11 @@ def main(argv: list[str] | None = None) -> int:
                 state.view = "history"
                 state.history_skip = state.selected_commit = 0
                 _load_history(state, commits, target)
+            elif key in {"b", "B", "t", "T", "z", "Z", "w", "W"}:
+                state.view = "management"
+                state.management_kind = {"b": "branches", "t": "tags", "z": "stashes", "w": "worktrees"}[key.lower()]
+                state.selected_management = 0
+                _load_management(state, management, target)
             elif key == "D":
                 if _action_paths(state):
                     state.pending_discard = True
@@ -332,3 +342,45 @@ def _handle_history_key(key: str, state: ApplicationState, service: CommitServic
             if detail:
                 state.commits = tuple(detail if item.hash == detail.hash else item for item in state.commits)
                 state.message = "Loaded selected commit details."
+
+
+def _load_management(state: ApplicationState, service: RepositoryManagementService, root: Path) -> None:
+    state.management_items = {"branches": service.branches, "tags": service.tags, "stashes": service.stashes, "worktrees": service.worktrees}[state.management_kind](root)
+    state.selected_management = min(state.selected_management, max(0, len(state.management_items) - 1))
+    state.message = f"Loaded {len(state.management_items)} {state.management_kind}."
+
+
+def _handle_management_key(key: str, state: ApplicationState, service: RepositoryManagementService, root: Path, ui: TerminalUI, refresher: RepositoryRefresher) -> None:
+    if key == "ESC": state.view = "dashboard"; return
+    if state.pending_management_delete:
+        item = state.current_management()
+        state.pending_management_delete = False
+        if key not in {"y", "Y"} or not item:
+            state.message = "Delete cancelled."; return
+        result = {"branches": lambda: service.delete_branch(root, item.name), "tags": lambda: service.delete_tag(root, item.name), "stashes": lambda: service.drop_stash(root, item.reference), "worktrees": lambda: service.remove_worktree(root, item.path)}[state.management_kind]()
+        state.message = "Operation completed." if result.succeeded else result.stderr.strip() or "Operation failed."
+        _load_management(state, service, root); refresher.refresh(root); return
+    if key in {"DOWN", "j", "J"}: state.selected_management = min(state.selected_management + 1, max(0, len(state.management_items) - 1)); return
+    if key in {"UP", "k", "K"}: state.selected_management = max(0, state.selected_management - 1); return
+    if key in {"r", "R"}: _load_management(state, service, root); return
+    item = state.current_management()
+    result = None
+    if key in {"ENTER"} and item:
+        if state.management_kind == "branches": result = service.switch_branch(root, item.name)
+        elif state.management_kind == "stashes": result = service.apply_stash(root, item.reference)
+    elif key in {"n", "N"}:
+        if state.management_kind == "branches":
+            name = _prompt_text(ui, "New branch name: "); result = service.create_branch(root, name) if name else None
+        elif state.management_kind == "tags":
+            name = _prompt_text(ui, "New tag name: "); result = service.create_tag(root, name) if name else None
+        elif state.management_kind == "stashes":
+            result = service.create_stash(root, _prompt_text(ui, "Stash message (blank allowed): "))
+        else:
+            path = _prompt_text(ui, "New worktree path: "); branch = _prompt_text(ui, "Existing branch: "); result = service.create_worktree(root, path, branch) if path and branch else None
+    elif key == "D" and item:
+        state.pending_management_delete = True
+        state.message = f"Delete {getattr(item, 'name', getattr(item, 'reference', getattr(item, 'path', 'item')))}? Press Y to confirm."
+        return
+    if result:
+        state.message = "Operation completed." if result.succeeded else result.stderr.strip() or "Operation failed."
+        _load_management(state, service, root); refresher.refresh(root)
