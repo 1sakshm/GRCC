@@ -10,6 +10,8 @@ from pathlib import Path
 from .config import ConfigStore
 from .commit_service import CommitService
 from .management_service import RepositoryManagementService
+from .operation_service import OperationService
+from .rebase_service import RebaseService
 from .repository_service import RepositoryService
 from .state import ApplicationState, RepositoryRefresher
 from .status_service import WorkingTreeService
@@ -33,6 +35,8 @@ def main(argv: list[str] | None = None) -> int:
     service = RepositoryService()
     commits = CommitService(service.runner)
     management = RepositoryManagementService(service.runner)
+    operations = OperationService(service.runner)
+    rebases = RebaseService(service.runner)
     working_tree = WorkingTreeService(service.runner)
     refresher = RepositoryRefresher(service)
     ui = TerminalUI(ascii_only=settings.ascii_only)
@@ -74,6 +78,12 @@ def main(argv: list[str] | None = None) -> int:
                 continue
             if state.view == "management":
                 _handle_management_key(key, state, management, target, ui, refresher)
+                continue
+            if state.view == "conflicts":
+                _handle_conflict_key(key, state, operations, target, refresher)
+                continue
+            if state.view == "rebase":
+                _handle_rebase_key(key, state, rebases, target)
                 continue
             if key in {"h", "H", "ESC"}:
                 state.show_help = not state.show_help if key != "ESC" else False
@@ -126,6 +136,32 @@ def main(argv: list[str] | None = None) -> int:
                 state.management_kind = {"b": "branches", "t": "tags", "z": "stashes", "w": "worktrees"}[key.lower()]
                 state.selected_management = 0
                 _load_management(state, management, target)
+            elif key in {"m", "M"}:
+                branch = _prompt_text(ui, "Merge branch: ")
+                if branch:
+                    result = operations.merge(target, branch)
+                    state.message = "Merge completed." if result.succeeded else result.stderr.strip() or "Merge needs resolution."
+                    _load_conflicts(state, operations, target); refresher.refresh(target)
+            elif key in {"x", "X"}:
+                _load_conflicts(state, operations, target)
+                if state.conflict: state.view = "conflicts"
+            elif key in {"p", "P"}:
+                commits_to_pick = (_prompt_text(ui, "Commit hash(es) to cherry-pick: ") or "").split()
+                if commits_to_pick:
+                    result = operations.cherry_pick(target, commits_to_pick); state.message = "Cherry-pick completed." if result.succeeded else result.stderr.strip() or "Cherry-pick needs resolution."; _load_conflicts(state, operations, target); refresher.refresh(target)
+            elif key in {"v", "V"}:
+                commits_to_revert = (_prompt_text(ui, "Commit hash(es) to revert: ") or "").split()
+                if commits_to_revert:
+                    result = operations.revert(target, commits_to_revert); state.message = "Revert completed." if result.succeeded else result.stderr.strip() or "Revert needs resolution."; _load_conflicts(state, operations, target); refresher.refresh(target)
+            elif key in {"l", "k", "a"}:
+                operation = operations.state(target)
+                if operation.in_progress and operation.kind:
+                    action = {"l": operations.continue_operation, "k": operations.skip_operation, "a": operations.abort_operation}[key]
+                    result = action(target, operation.kind); state.message = f"{operation.kind} { {'l':'continued','k':'skipped','a':'aborted'}[key] }." if result.succeeded else result.stderr.strip() or "Operation failed."; refresher.refresh(target)
+            elif key in {"i", "I"}:
+                state.rebase_upstream = _prompt_text(ui, "Rebase upstream (example: origin/main): ") or ""
+                state.rebase_todos = rebases.preview(target, state.rebase_upstream) if state.rebase_upstream else ()
+                state.view = "rebase"; state.selected_rebase = 0
             elif key == "D":
                 if _action_paths(state):
                     state.pending_discard = True
@@ -384,3 +420,35 @@ def _handle_management_key(key: str, state: ApplicationState, service: Repositor
     if result:
         state.message = "Operation completed." if result.succeeded else result.stderr.strip() or "Operation failed."
         _load_management(state, service, root); refresher.refresh(root)
+
+
+def _load_conflicts(state: ApplicationState, service: OperationService, root: Path) -> None:
+    state.operation = service.state(root); state.conflict_files = service.conflicted_files(root)
+    state.conflict = service.conflict_file(root, state.conflict_files[0]) if state.conflict_files else None
+    state.conflict_index = 0
+    if state.conflict: state.message = f"Loaded {len(state.conflict.blocks)} conflict block(s)."
+
+
+def _handle_conflict_key(key: str, state: ApplicationState, service: OperationService, root: Path, refresher: RepositoryRefresher) -> None:
+    if key == "ESC": state.view = "dashboard"; return
+    block = state.current_conflict()
+    if key in {"n", "N"} and state.conflict: state.conflict_index = min(state.conflict_index + 1, len(state.conflict.blocks) - 1); return
+    if key in {"p", "P"}: state.conflict_index = max(0, state.conflict_index - 1); return
+    if key in {"1", "2", "3", "4"} and block and state.conflict:
+        choice = {"1": "ours", "2": "theirs", "3": "both", "4": "base"}[key]
+        result = service.resolve(root, state.conflict.path, block, choice)
+        state.message = "Conflict block resolved and staged." if result.succeeded else result.stderr.strip() or "Could not resolve conflict."
+        _load_conflicts(state, service, root); refresher.refresh(root)
+
+
+def _handle_rebase_key(key: str, state: ApplicationState, service: RebaseService, root: Path) -> None:
+    if key == "ESC": state.view = "dashboard"; return
+    if key in {"DOWN", "j", "J"}: state.selected_rebase = min(state.selected_rebase + 1, max(0, len(state.rebase_todos) - 1)); return
+    if key in {"UP", "k", "K"}: state.selected_rebase = max(0, state.selected_rebase - 1); return
+    if key in {"a", "A"} and state.rebase_todos:
+        todo = state.rebase_todos[state.selected_rebase]; actions = service.actions; action = actions[(actions.index(todo.action) + 1) % len(actions)]
+        state.rebase_todos = tuple(type(item)(action, item.commit, item.subject) if index == state.selected_rebase else item for index, item in enumerate(state.rebase_todos)); return
+    if key in {"r", "R"} and state.rebase_todos and state.selected_rebase > 0:
+        todos = list(state.rebase_todos); todos[state.selected_rebase - 1], todos[state.selected_rebase] = todos[state.selected_rebase], todos[state.selected_rebase - 1]; state.rebase_todos = tuple(todos); state.selected_rebase -= 1; return
+    if key == "ENTER" and state.rebase_upstream:
+        result = service.start(root, state.rebase_upstream); state.message = "Rebase started." if result.succeeded else result.stderr.strip() or "Rebase did not start."

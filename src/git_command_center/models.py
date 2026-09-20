@@ -187,6 +187,33 @@ class WorktreeRecord:
 
 
 @dataclass(frozen=True)
+class ConflictBlock:
+    start_line: int
+    ours: tuple[str, ...]
+    base: tuple[str, ...]
+    theirs: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class ConflictFile:
+    path: str
+    blocks: tuple[ConflictBlock, ...]
+
+
+@dataclass(frozen=True)
+class OperationState:
+    kind: str | None = None
+    in_progress: bool = False
+
+
+@dataclass(frozen=True)
+class RebaseTodo:
+    action: str
+    commit: str
+    subject: str
+
+
+@dataclass(frozen=True)
 class RepositoryState:
     requested_path: Path
     root: Path | None = None

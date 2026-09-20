@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .models import CommitRecord, DiffFile, RepositoryState
+from .models import CommitRecord, ConflictFile, DiffFile, OperationState, RebaseTodo, RepositoryState
 from .repository_service import RepositoryService
 
 
@@ -40,6 +40,16 @@ class ApplicationState:
     management_items: tuple = ()
     selected_management: int = 0
     pending_management_delete: bool = False
+    operation: OperationState = field(default_factory=OperationState)
+    conflict_files: tuple[str, ...] = ()
+    conflict: ConflictFile | None = None
+    conflict_index: int = 0
+    rebase_todos: tuple[RebaseTodo, ...] = ()
+    selected_rebase: int = 0
+    rebase_upstream: str = ""
+
+    def current_conflict(self):
+        return self.conflict.blocks[self.conflict_index] if self.conflict and self.conflict.blocks else None
 
     def current_management(self):
         return self.management_items[self.selected_management] if self.management_items else None

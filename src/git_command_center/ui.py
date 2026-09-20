@@ -49,6 +49,10 @@ class TerminalUI:
             frame = self._history(state, width, height)
         elif state.view == "management":
             frame = self._management(state, width, height)
+        elif state.view == "conflicts":
+            frame = self._conflicts(state, width)
+        elif state.view == "rebase":
+            frame = self._rebase(state, width)
         elif state.dashboard:
             frame = self._dashboard(state, width)
         else:
@@ -140,6 +144,23 @@ class TerminalUI:
         rows.append(self._status(state.message, width))
         return rows
 
+    def _conflicts(self, state: ApplicationState, width: int) -> list[str]:
+        rows = self._box(f"MERGE CONFLICT - {state.conflict.path if state.conflict else 'none'}", width)
+        block = state.current_conflict()
+        if not block: rows.append(self._row("No conflict block selected.", width, self.theme.muted))
+        else:
+            rows.append(self._row(f"Conflict {state.conflict_index + 1}/{len(state.conflict.blocks)}", width, self.theme.warning))
+            for label, values in (("OURS", block.ours), ("BASE", block.base), ("THEIRS", block.theirs)):
+                rows.append(self._row(f"{label}: {' | '.join(values) or '(empty)'}", width))
+        rows.append(self._border(width, "bottom")); rows.append(self._row("[1] Ours [2] Theirs [3] Both [4] Base [N/P] Next [Esc] Back", width)); rows.append(self._status(state.message, width))
+        return rows
+
+    def _rebase(self, state: ApplicationState, width: int) -> list[str]:
+        rows = self._box("INTERACTIVE REBASE", width)
+        for index, todo in enumerate(state.rebase_todos[:12]): rows.append(self._row(f"{'> ' if index == state.selected_rebase else '  '}{todo.action:<7} {todo.commit[:8]}  {todo.subject}", width))
+        if not state.rebase_todos: rows.append(self._row("Choose an upstream revision to preview commits.", width, self.theme.muted))
+        rows.append(self._border(width, "bottom")); rows.append(self._row("[Up/Down] Move [A] Action [R] Reorder [Enter] Start [Esc] Back", width)); rows.append(self._status(state.message, width)); return rows
+
     def _unified(self, lines, width: int, capacity: int) -> list[str]:
         prefix = {"context": " ", "addition": "+", "deletion": "-", "meta": "\\"}
         rows = []
@@ -184,7 +205,7 @@ class TerminalUI:
         lines.append(self._border(width, "bottom"))
         controls = "[S] Stage [U] Unstage [d] Diff [G] Graph [D] Discard [Space] Select [F] Filter"
         lines.append(self._row(controls, width))
-        lines.append(self._row("[E] Editor [C] Copy path [R] Refresh [O] Open [H] Help [Q] Quit", width))
+        lines.append(self._row("[M] Merge [P] Pick [V] Revert [X] Conflicts [L/K/A] Continue/Skip/Abort", width))
         if state.pending_discard:
             lines.append(self._row("Discard selected changes? [Y] Yes  [N] No", width, self.theme.warning))
         lines.append(self._status(state.message, width))
