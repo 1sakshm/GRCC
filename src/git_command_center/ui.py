@@ -53,6 +53,10 @@ class TerminalUI:
             frame = self._conflicts(state, width)
         elif state.view == "rebase":
             frame = self._rebase(state, width)
+        elif state.view == "time":
+            frame = self._time_machine(state, width)
+        elif state.view == "analytics":
+            frame = self._analytics(state, width)
         elif state.dashboard:
             frame = self._dashboard(state, width)
         else:
@@ -160,6 +164,17 @@ class TerminalUI:
         for index, todo in enumerate(state.rebase_todos[:12]): rows.append(self._row(f"{'> ' if index == state.selected_rebase else '  '}{todo.action:<7} {todo.commit[:8]}  {todo.subject}", width))
         if not state.rebase_todos: rows.append(self._row("Choose an upstream revision to preview commits.", width, self.theme.muted))
         rows.append(self._border(width, "bottom")); rows.append(self._row("[Up/Down] Move [A] Action [R] Reorder [Enter] Start [Esc] Back", width)); rows.append(self._status(state.message, width)); return rows
+
+    def _time_machine(self, state: ApplicationState, width: int) -> list[str]:
+        rows = self._box("GIT TIME MACHINE", width)
+        for index, commit in enumerate(state.timeline[:12]): rows.append(self._row(f"{'> ' if index == state.selected_timeline else '  '}{commit.timestamp[:10]}  {commit.commit[:8]}  {commit.subject}", width))
+        rows.append(self._border(width, "bottom")); rows.append(self._row("[Up/Down] Travel  [Enter] Inspect files  [Esc] Back", width)); rows.append(self._status(state.message, width)); return rows
+
+    def _analytics(self, state: ApplicationState, width: int) -> list[str]:
+        rows = self._box("ANALYTICS", width); data = state.analytics
+        if data:
+            rows += [self._row(f"Total commits: {data.total_commits}", width), self._row(f"Top contributors: {', '.join(f'{n} ({c})' for n,c in data.contributors[:3]) or 'none'}", width), self._row(f"Hotspots: {', '.join(f'{p} ({c})' for p,c in data.hotspots[:3]) or 'none'}", width), self._row(f"Languages: {', '.join(f'{n} ({c})' for n,c in data.languages[:5]) or 'none'}", width)]
+        rows.append(self._border(width, "bottom")); rows.append(self._row("[R] Refresh analytics  [Esc] Back", width)); rows.append(self._status(state.message, width)); return rows
 
     def _unified(self, lines, width: int, capacity: int) -> list[str]:
         prefix = {"context": " ", "addition": "+", "deletion": "-", "meta": "\\"}

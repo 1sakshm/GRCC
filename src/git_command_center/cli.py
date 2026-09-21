@@ -12,6 +12,8 @@ from .commit_service import CommitService
 from .management_service import RepositoryManagementService
 from .operation_service import OperationService
 from .rebase_service import RebaseService
+from .time_machine_service import TimeMachineService
+from .remote_analytics_service import RemoteAnalyticsService
 from .repository_service import RepositoryService
 from .state import ApplicationState, RepositoryRefresher
 from .status_service import WorkingTreeService
@@ -37,6 +39,8 @@ def main(argv: list[str] | None = None) -> int:
     management = RepositoryManagementService(service.runner)
     operations = OperationService(service.runner)
     rebases = RebaseService(service.runner)
+    time_machine = TimeMachineService(service.runner)
+    remote_analytics = RemoteAnalyticsService(service.runner)
     working_tree = WorkingTreeService(service.runner)
     refresher = RepositoryRefresher(service)
     ui = TerminalUI(ascii_only=settings.ascii_only)
@@ -84,6 +88,16 @@ def main(argv: list[str] | None = None) -> int:
                 continue
             if state.view == "rebase":
                 _handle_rebase_key(key, state, rebases, target)
+                continue
+            if state.view == "time":
+                if key == "ESC": state.view = "dashboard"
+                elif key in {"DOWN", "j", "J"}: state.selected_timeline = min(state.selected_timeline + 1, max(0, len(state.timeline)-1))
+                elif key in {"UP", "k", "K"}: state.selected_timeline = max(0, state.selected_timeline-1)
+                elif key == "ENTER" and state.timeline: state.message = f"{len(time_machine.files_at(target, state.timeline[state.selected_timeline].commit))} files at selected commit."
+                continue
+            if state.view == "analytics":
+                if key == "ESC": state.view = "dashboard"
+                elif key in {"r", "R"}: state.analytics = remote_analytics.analytics(target); state.message = "Analytics refreshed."
                 continue
             if key in {"h", "H", "ESC"}:
                 state.show_help = not state.show_help if key != "ESC" else False
@@ -162,6 +176,10 @@ def main(argv: list[str] | None = None) -> int:
                 state.rebase_upstream = _prompt_text(ui, "Rebase upstream (example: origin/main): ") or ""
                 state.rebase_todos = rebases.preview(target, state.rebase_upstream) if state.rebase_upstream else ()
                 state.view = "rebase"; state.selected_rebase = 0
+            elif key in {"y", "Y"}:
+                state.timeline = time_machine.timeline(target); state.selected_timeline = 0; state.view = "time"; state.message = f"Loaded {len(state.timeline)} commits."
+            elif key == "9":
+                state.analytics = remote_analytics.analytics(target); state.view = "analytics"; state.message = "Analytics loaded."
             elif key == "D":
                 if _action_paths(state):
                     state.pending_discard = True

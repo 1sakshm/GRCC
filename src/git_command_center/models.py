@@ -214,6 +214,30 @@ class RebaseTodo:
 
 
 @dataclass(frozen=True)
+class TimelineCommit:
+    commit: str
+    timestamp: str
+    subject: str
+
+
+@dataclass(frozen=True)
+class BlameLine:
+    line_number: int
+    commit: str
+    author: str
+    timestamp: str
+    content: str
+
+
+@dataclass(frozen=True)
+class AnalyticsSnapshot:
+    total_commits: int
+    contributors: tuple[tuple[str, int], ...]
+    hotspots: tuple[tuple[str, int], ...]
+    languages: tuple[tuple[str, int], ...]
+
+
+@dataclass(frozen=True)
 class RepositoryState:
     requested_path: Path
     root: Path | None = None

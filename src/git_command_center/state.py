@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .models import CommitRecord, ConflictFile, DiffFile, OperationState, RebaseTodo, RepositoryState
+from .models import AnalyticsSnapshot, CommitRecord, ConflictFile, DiffFile, OperationState, RebaseTodo, RepositoryState, TimelineCommit
 from .repository_service import RepositoryService
 
 
@@ -47,6 +47,9 @@ class ApplicationState:
     rebase_todos: tuple[RebaseTodo, ...] = ()
     selected_rebase: int = 0
     rebase_upstream: str = ""
+    timeline: tuple[TimelineCommit, ...] = ()
+    selected_timeline: int = 0
+    analytics: AnalyticsSnapshot | None = None
 
     def current_conflict(self):
         return self.conflict.blocks[self.conflict_index] if self.conflict and self.conflict.blocks else None
